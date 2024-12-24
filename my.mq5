@@ -8,12 +8,14 @@
 #include <MT4Orders.mqh>
 #endif
 #property strict
+#property copyright "Tác giả: longtrieuuit"
+#property version   "1.1"
 
 input string Blank01="=========================================";//================================
 input string EASettings="EA Settings:1.2";//Cài đặt EA tổng thể
 input int Magic=234; //Mã nhận dạng lệnh
 input bool RecordCSV=false;//Ghi file CSV
-input double CloseAllWhenDD=6000;//Đóng tất cả khi lỗ đạt mức (0 để vô hiệu hóa)
+input double CloseAllWhenDD=0;//Đóng tất cả khi lỗ đạt mức (0 để vô hiệu hóa)
 input double FloatDDLimit=10000;//Giới hạn lỗ nổi tối đa
 input double MaxDDLimit=15000;//Giới hạn lỗ tối đa
 
@@ -37,17 +39,18 @@ input string LabelLS="Lot Size Settings:";//Cài đặt khối lượng lệnh
 input double StartLots=0.1;//Khối lượng khởi đầu
 input double NextStartLots=0.2;//Khối lượng khởi đầu cho các lệnh tiếp theo
 input double MultiplyFactor=1.75;//Hệ số nhân (gợi ý 1.3/0.1/2)
+input string LotValues = "0.1,0.2,0.4,0.8,1.6,3.2,6.4,12.8,25.6,51.2,102.4,204.8,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12";
 double LotArray[50];//Mặc định tối đa 50 cấp độ
 
 input string Blank04="=========================================";//================================
 input string LabelGS="Grid Settings:";//Cài đặt lưới
-input double MinimumTP=0.5; //Chốt lời tối thiểu (gợi ý 1/0.5/30)
-input double GridAdjustmentFactor=2.5; //Hệ số điều chỉnh lưới (gợi ý 1/0.5/15)
-double Distance=0;//Khoảng cách thực tế giữa các cấp độ lưới
+input double MinimumTP=0.2; //[]TP= LastBuyPrice *0.2 - Chốt lời tối thiểu
+input double GridAdjustmentFactor=0.005; //[]Hệ số điều chỉnh lưới (Price lần kết tiếp dca = LastBuyPrice - LastBuyPrice*0.005)
+double Distance=1;//Khoảng cách thực tế giữa các cấp độ lưới
 
 input string Blank05="=========================================";//================================
 input string LabelTS="Trading Settings:";//Cài đặt giao dịch
-input int MaxTrades=10; //Số lượng vị thế tối đa (gợi ý 3/1/10)
+input int MaxTrades=6; //Số lượng vị thế tối đa (gợi ý 3/1/10)
 input int DueDays=28;//Thời gian giữ lệnh lâu nhất (gợi ý 1/1/28)
 
 input string Blank06="=========================================";//================================
@@ -179,16 +182,40 @@ string OrderCommentBuy="", OrderCommentSell=""; // Ghi chú cho lệnh mua và b
 string StatFile_Close=""; // Tên file thống kê
 double Point; // Độ chính xác của giá
 
+
+// Hàm tách chuỗi và lưu vào mảng
+int ParseLotArray(string lineinput, double &array[]) {
+   int count = 0;                     // Số lượng giá trị được tách
+   StringReplace(lineinput, " ", "");     // Xóa khoảng trắng nếu có
+   int start = 0;
+   while (start < StringLen(lineinput) && count < ArraySize(array)) {
+      int pos = StringFind(lineinput, ",", start); // Tìm dấu phẩy
+      if (pos == -1) {
+         // Không tìm thấy dấu phẩy, lấy phần cuối chuỗi
+         array[count] = StringToDouble(StringSubstr(lineinput, start));
+         count++;
+         break;
+      }
+      // Tách giá trị từ chuỗi
+      array[count] = StringToDouble(StringSubstr(lineinput, start, pos - start));
+      count++;
+      start = pos + 1; // Tiếp tục từ sau dấu phẩy
+   }
+   return count; // Trả về số lượng phần tử đã tách
+}
+
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   int lotCount = ParseLotArray(LotValues, LotArray); // Tách giá trị từ input
    EventSetTimer(600); // Cài đặt bộ đếm thời gian mỗi 5 phút (300 giây
    Point=SymbolInfoDouble(Symbol(),SYMBOL_POINT);
-   HideTestIndicators(true); // Ẩn chỉ báo (MT5 không hỗ trợ, bỏ qua)
+   //HideTestIndicators(true); // Ẩn chỉ báo (MT5 không hỗ trợ, bỏ qua)
 
-   isTesting=(IsTesting() || IsOptimization() || IsVisualMode());
+   //isTesting=(IsTesting() || IsOptimization() || IsVisualMode());
    isVisualMode=IsVisualMode();
    // Đánh dấu môi trường kiểm tra hoặc tối ưu hóa, bỏ qua một số bước không cần thiết
 
@@ -238,10 +265,10 @@ int OnInit()
 
    Print("Khối lượng tối thiểu: ",MarketInfo(Symbol(),MODE_MINLOT)," Bước khối lượng:",MarketInfo(Symbol(),MODE_LOTSTEP));
 
-   LotArray[0]=StartLots;
-   for(int i=1;i<=MaxTrades;i++) // Mảng khối lượng lệnh tiếp theo, mặc định bắt đầu từ 0.02 lot
+   //LotArray[0]=StartLots;
+   for(int i=0;i<=MaxTrades;i++) // Mảng khối lượng lệnh tiếp theo, mặc định bắt đầu từ 0.02 lot
      {
-      LotArray[i]=NormalizeDouble(NextStartLots*MathPow(MultiplyFactor,i-1),LotsDigits);
+      LotArray[i]=NormalizeDouble(LotArray[i],LotsDigits);
       // Mảng khối lượng lệnh tiếp theo
       Print("Lệnh ",i," Vol: ",DoubleToString(LotArray[i],3) );
      }
@@ -311,6 +338,16 @@ int OnInit()
      }
    handle_ATR=iATR(Symbol(),PERIOD_H1,500);
 #endif
+   if(reloadAtStart)
+     {
+     Distance=1;
+     reloadAtStart = false;
+      // Chỉ làm mới nếu số lượng lệnh thay đổi
+      UpdateRegisters(); // Cập nhật thông tin các lệnh
+      LastOrdersTotal=OrdersTotal(); // Lưu số lượng lệnh hiện tại
+     }
+
+
    return (INIT_SUCCEEDED);
 
   }
@@ -472,26 +509,59 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-
-void SetHLine(color cl,string nm="",double p1=0,int st=0,int wd=1)
-  {
+void SetHLine(color cl, string nm = "", double p1 = 0, int st = 0, int wd = 1)
+{
    Print("SetHLine: Tên = ", nm, ", Giá = ", p1, ", Màu = ", cl, ", Kiểu = ", st, ", Độ dày = ", wd);
-   if(ObjectFind(0,nm)<0) ObjectCreate(0,nm,OBJ_HLINE,0,0,0);
-   ObjectSetDouble(0,nm,OBJPROP_PRICE,p1);
-   ObjectSetInteger(0,nm,OBJPROP_COLOR,cl);
-   ObjectSetInteger(0,nm,OBJPROP_STYLE,st);
-   ObjectSetInteger(0,nm,OBJPROP_WIDTH,wd);
-  }
+
+   // Tạo đường ngang nếu chưa tồn tại
+   if(ObjectFind(0, nm) < 0)
+   {
+      if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, 0))
+      {
+         Print("Không thể tạo đường ngang: ", nm, ". Lỗi: ", GetLastError());
+         return;
+      }
+   }
+
+   // Đặt thuộc tính cho đường ngang
+   ObjectSetDouble(0, nm, OBJPROP_PRICE, p1);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, cl);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, st);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, wd);
+
+   // Tạo văn bản trên đường ngang (sử dụng chính tên của đường ngang)
+   string textName = nm + "_Text";
+   if(ObjectFind(0, textName) < 0)
+   {
+      if(!ObjectCreate(0, textName, OBJ_TEXT, 0, TimeCurrent(), p1))
+      {
+         Print("Không thể tạo văn bản: ", textName, ". Lỗi: ", GetLastError());
+         return;
+      }
+   }
+
+   // Đặt thuộc tính cho văn bản
+   ObjectSetInteger(0, textName, OBJPROP_COLOR, cl);
+   ObjectSetInteger(0, textName, OBJPROP_FONTSIZE, 10); // Sử dụng OBJPROP_FONTSIZE thay vì OBJPROP_FONT_SIZE
+   ObjectSetString(0, textName, OBJPROP_TEXT, nm);      // Nội dung văn bản
+}
+
+
+bool reloadAtStart = true;
+static int LastOrdersTotal; // Lưu số lượng lệnh mở lần cuối
+static double BuySL, SellSL; // Mức cắt lỗ cho lệnh mua và bán
+static double accountProfit; // Lợi nhuận tài khoản hiện tại
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   static int LastOrdersTotal; // Lưu số lượng lệnh mở lần cuối
-   static double BuySL, SellSL; // Mức cắt lỗ cho lệnh mua và bán
-   static double accountProfit; // Lợi nhuận tài khoản hiện tại
-   accountProfit=AccountInfoDouble(ACCOUNT_PROFIT); // Lấy lợi nhuận tài khoản
-   MaxFloatLoss=MathMin(MaxFloatLoss,accountProfit); // Lưu lỗ nổi lớn nhất
+  
+
+
+   //accountProfit=AccountInfoDouble(ACCOUNT_PROFIT); // Lấy lợi nhuận tài khoản
+  // MaxFloatLoss=MathMin(MaxFloatLoss,accountProfit); // Lưu lỗ nổi lớn nhất
+   
 
 #ifdef __MQL5__
    // Xử lý các hành động cụ thể của MQL5 (để trống ở đây)
@@ -500,57 +570,8 @@ void OnTick()
    Time_Current=TimeCurrent();
    // Lấy thời gian hiện tại và lưu vào biến, tránh gọi hàm nhiều lần làm giảm tốc độ
 
-   if(CloseAllWhenDD>0 && accountProfit<-CloseAllWhenDD)
-     {
-      // Nếu thiết lập mức đóng tất cả khi thua lỗ đạt mức cụ thể
-      CloseAllOrders(); // Đóng tất cả lệnh
-     }
-   if(CloseAllWhenDD<=0 && MaxFloatLoss<-FloatDDLimit)
-     {
-      // Nếu không thiết lập đóng tự động và lỗ nổi vượt quá giới hạn cho phép
-      InvalidResult=true; // Đánh dấu kết quả giao dịch không hợp lệ
-      CloseAllOrders(); // Đóng tất cả lệnh
-      ExpertRemove(); // Xóa EA
-     }
-
    if(UseZuluTradeP_N) ZuluTrade(); // Tính toán hiệu suất theo phương pháp ZuluTrade
 
-   if(UseTrailStop)
-     {
-      Ask=SymbolInfoDouble(Symbol(),SYMBOL_ASK); // Lấy giá mua (Ask)
-      Bid=SymbolInfoDouble(Symbol(),SYMBOL_BID); // Lấy giá bán (Bid)
-
-      if(Bid-AverageBuyPrice>=Point*SLStarts && BuyOrdersCount>0)
-        {
-         // Nếu giá bán đã vượt quá giá mua trung bình + khoảng dừng cắt lỗ và có lệnh mua
-         if(BuySL==0) BuySL=Bid-Point*SLPips; // Thiết lập cắt lỗ lần đầu
-         BuySL=MathMax(BuySL, Bid-Point*SLPips); // Điều chỉnh mức cắt lỗ
-         if(isVisualMode) SetHLine(clrRed, "Buy", BuySL, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
-        }
-      if(AverageSellPrice-Ask>=Point*SLStarts && SellOrdersCount>0)
-        {
-         // Nếu giá mua đã vượt quá giá bán trung bình + khoảng dừng cắt lỗ và có lệnh bán
-         if(SellSL==0) SellSL=Ask+Point*SLPips; // Thiết lập cắt lỗ lần đầu
-         SellSL=MathMin(SellSL, Ask+Point*SLPips); // Điều chỉnh mức cắt lỗ
-         if(isVisualMode) SetHLine(clrRed, "Sell", SellSL, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
-        }
-      if(BuySL>0 && Bid<BuySL && BuyOrdersCount>0)
-        {
-         // Nếu mức cắt lỗ mua bị phá vỡ
-         Print("BuySL=", BuySL, ",Bid=", Bid, ",Point*SLPips=", Point*SLPips);
-         BuySL=0; // Đặt lại mức cắt lỗ
-         CloseBuyOrders(); // Đóng tất cả lệnh mua
-         // if(isVisualMode) SetHLine(clrRed, "Buy", 0, 0, 1); // Loại bỏ mức cắt lỗ trên biểu đồ
-        }
-      if(SellSL>0 && Ask>SellSL && SellOrdersCount>0)
-        {
-         // Nếu mức cắt lỗ bán bị phá vỡ
-         Print("SellSL=", SellSL, ",Ask=", Ask, ",Point*SLPips=", Point*SLPips);
-         SellSL=0; // Đặt lại mức cắt lỗ
-         CloseSellOrders(); // Đóng tất cả lệnh bán
-         // if(isVisualMode) SetHLine(clrRed, "Sell", 0, 0, 1); // Loại bỏ mức cắt lỗ trên biểu đồ
-        }
-     }
 
    if(Time_Current >= NextOperateTime)
       // Nếu đến thời gian cho lần xử lý tiếp theo
@@ -567,10 +588,10 @@ void OnTick()
          // Thực hiện các thiết lập ban đầu chỉ một lần
         {
 #ifdef __MQL5__
-         Distance=IndGet(handle_ATR, 0, 1); // Lấy khoảng cách ATR (MQL5)
+         Distance=1; // Lấy khoảng cách ATR (MQL5)
 #endif
 #ifdef __MQL4__
-         Distance=iATR(Symbol(), PERIOD_H1, 500, 1); // Lấy khoảng cách ATR (MQL4)
+         Distance=1; // Lấy khoảng cách ATR (MQL4)
 #endif
          OneTimeInit=false; // Đánh dấu hoàn thành thiết lập
         }
@@ -580,10 +601,11 @@ void OnTick()
       Bid=SymbolInfoDouble(Symbol(),SYMBOL_BID); // Cập nhật giá Bid (MQL5)
 #endif
 
-      if(!DisableRefreashRegisters || !isTesting)
+   
          // Nếu không tắt cập nhật hoặc không ở chế độ kiểm tra
-         if(OrdersTotal() != LastOrdersTotal || !isTesting)
+         if(OrdersTotal() != LastOrdersTotal)
            {
+            Print("----LastOrdersTotal",LastOrdersTotal);
             // Chỉ làm mới nếu số lượng lệnh thay đổi
             UpdateRegisters(); // Cập nhật thông tin các lệnh
             LastOrdersTotal=OrdersTotal(); // Lưu số lượng lệnh hiện tại
@@ -607,7 +629,7 @@ void OnTick()
          if(BuyOrdersCount > 0 && BuyOrdersCount < MaxTrades && Time_Current >= LastBuyTime + PlaceOrderLimit)
             // Nếu có lệnh mua, số lượng nhỏ hơn giới hạn, và thỏa mãn thời gian đặt lệnh tiếp theo
            {
-            if(Ask < LastBuyOrderOpenPrice - Distance * GridAdjustmentFactor)
+            if(Ask < (LastBuyOrderOpenPrice-(LastBuyOrderOpenPrice  * GridAdjustmentFactor)))
               {
                // Nếu giá giảm đủ để đáp ứng điều kiện bổ sung lệnh mua
                if(Ind(EnterInd1, "Enter1") >= 0)
@@ -618,20 +640,16 @@ void OnTick()
            }
          if(BuyOrdersCount == 0)
            {
-            // Nếu không có lệnh mua
-            if(Ind(EnterInd1, "Enter1") >= 0)
-               if(Ind(EnterInd2, "Enter2") >= 0)
+
                   SendBuyOrder(LotArray[BuyOrdersCount], Magic);
             // Gửi lệnh mua
            }
          if(SellOrdersCount > 0 && SellOrdersCount < MaxTrades && Time_Current >= LastSellTime + PlaceOrderLimit)
             // Nếu có lệnh bán, số lượng nhỏ hơn giới hạn, và thỏa mãn thời gian đặt lệnh tiếp theo
            {
-            if(Bid > LastSellOrderOpenPrice + Distance * GridAdjustmentFactor)
+            if(Bid > (LastSellOrderOpenPrice +  (LastSellOrderOpenPrice  * GridAdjustmentFactor)))
               {
-               // Nếu giá tăng đủ để đáp ứng điều kiện bổ sung lệnh bán
-               if(Ind(EnterInd1, "Enter1") <= 0)
-                  if(Ind(EnterInd2, "Enter2") <= 0)
+     
                      SendSellOrder(LotArray[SellOrdersCount], Magic);
                // Gửi lệnh bán
               }
@@ -651,13 +669,44 @@ void OnTick()
      }
   }
 
+
+// Hàm xóa tất cả các đường ngang (OBJ_HLINE)
+void DeleteAllHLines()
+{
+   int totalObjects = ObjectsTotal(0); // Tổng số đối tượng trên biểu đồ hiện tại
+   for(int i = totalObjects - 1; i >= 0; i--) // Lặp ngược qua các đối tượng
+   {
+      string objectName = ObjectName(0, i); // Lấy tên của đối tượng
+      int objectType = ObjectType(objectName); // Lấy loại đối tượng
+
+      // Kiểm tra nếu đối tượng là đường ngang hoặc văn bản
+      if(objectType == OBJ_HLINE || objectType == OBJ_TEXT)
+      {
+         if(ObjectDelete(0, objectName)) // Xóa đối tượng
+         {
+            if(objectType == OBJ_HLINE)
+               Print("Đã xóa đường ngang: ", objectName);
+            else if(objectType == OBJ_TEXT)
+               Print("Đã xóa văn bản: ", objectName);
+         }
+         else
+         {
+            Print("Không thể xóa đối tượng: ", objectName, ". Lỗi: ", GetLastError());
+         }
+      }
+   }
+   Print("Hoàn tất xóa tất cả các đường ngang và văn bản!");
+}
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
 void SendBuyOrder(double lots, int magic)
   {
    // Tạo ghi chú cho lệnh mua (có thể sử dụng số thứ tự của lệnh)
-   OrderCommentBuy=IntegerToString(BuyOrdersCount+1);
+   //OrderCommentBuy=IntegerToString(BuyOrdersCount+1);
+  
+   OrderCommentBuy = IntegerToString(SellOrdersCount+1);
 
    // Gửi lệnh mua (OrderSend) và lưu số hiệu lệnh vào mảng BuyTicket
    BuyTicket[BuyOrdersCount]=OrderSend(Symbol(),OP_BUY,lots,Ask,9999,0,0,OrderCommentBuy,magic,0,clrNONE);
@@ -682,11 +731,11 @@ void SendBuyOrder(double lots, int magic)
 
 #ifdef __MQL5__
    // Nếu sử dụng MQL5, lấy khoảng cách ATR từ chỉ báo (hàm IndGet)
-   Distance=IndGet(handle_ATR,0,1);
+   Distance=1;
 #endif
 #ifdef __MQL4__
    // Nếu sử dụng MQL4, lấy khoảng cách ATR từ chỉ báo iATR
-   Distance=iATR(Symbol(),PERIOD_H1,500,1);
+   Distance=1;
 #endif
 
    // Tính mức chốt lời tối thiểu (MinimumTargetBuyTP)
@@ -694,8 +743,12 @@ void SendBuyOrder(double lots, int magic)
 
    // Ghi nhận giá trị mức chốt lời và số lượng lệnh mua hiện tại để kiểm tra
    Print("SendBuyOrder: MinimumTargetBuyTP= ", MinimumTargetBuyTP, ", BuyOrdersCount= ", BuyOrdersCount);
-   float PriceDcaNext = LastBuyOrderOpenPrice - Distance * GridAdjustmentFactor;
+   float PriceDcaNext = LastBuyOrderOpenPrice  - (LastBuyOrderOpenPrice  * GridAdjustmentFactor);
    Print("Buy PriceDcaNext= ", PriceDcaNext);
+   DeleteAllHLines();
+   SetHLine(clrRed, "PriceDcaNext:"+DoubleToString(PriceDcaNext,2), PriceDcaNext, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+   SetHLine(clrYellow, "TP"+DoubleToString(MinimumTargetBuyTP,2), MinimumTargetBuyTP, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+   SetHLine(clrSteelBlue, "AveragePrice:"+DoubleToString(AverageBuyPrice,2), AverageBuyPrice, 0, 1); // Hiển thị AveragePrice
    // SetHLine(clrRed, "PriceDcaNext", PriceDcaNext, 0, 1);
   }
 
@@ -723,15 +776,19 @@ void SendSellOrder(double lots,int magic)
       //若是第一单 记录下单时间，此单开仓时间作为判定时间点
       FirstSellOrderTime=Time_Current;
 #ifdef __MQL5__
-   Distance=IndGet(handle_ATR,0,1);
+   Distance=1;
 #endif
 #ifdef __MQL4__
-   Distance=iATR(Symbol(),PERIOD_H1,500,1);
+   Distance=1;
 #endif
    MinimumTargetSellTP=AverageSellPrice==0 ? 0 : NormalizeDouble(AverageSellPrice-Distance*MinimumTP,Digits);
    Print("SendSellOrder: MinimumTargetSellTP= ", MinimumTargetSellTP, ", SellOrdersCount= ", SellOrdersCount);
-   float PriceDcaNext = LastBuyOrderOpenPrice + Distance * GridAdjustmentFactor;
+   float PriceDcaNext = LastSellOrderOpenPrice + (LastSellOrderOpenPrice  * GridAdjustmentFactor);
    Print("Sell PriceDcaNext= ", PriceDcaNext);
+   DeleteAllHLines();
+   SetHLine(clrRed, "PriceDcaNext:"+DoubleToString(PriceDcaNext,2), PriceDcaNext, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+   SetHLine(clrYellow, "TP "+DoubleToString(MinimumTargetSellTP,2), MinimumTargetSellTP, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+   SetHLine(clrSteelBlue, "AveragePrice:"+DoubleToString(AverageSellPrice,2), AverageSellPrice, 0, 1); // Hiển thị AveragePrice
 //空单市价已经低于卖出均价+止盈
   }
 //+------------------------------------------------------------------+
@@ -1159,6 +1216,7 @@ void UpdateRegisters()
 // Dùng để đảm bảo EA nhận biết khi lệnh bị từ chối hoặc có lỗi
 // Chỉ dành cho chế độ tự động, không cần tối ưu hiệu suất
   {
+  Print("UpdateRegisters");
    BuyOrdersCount=0; // Số lượng lệnh mua
    SellOrdersCount=0; // Số lượng lệnh bán
    OrdersTotalByThisEA=0; // Tổng số lệnh của EA
@@ -1274,6 +1332,26 @@ void UpdateRegisters()
            }
         }
      }
+     
+    
+    if(BuyOrdersCount>0)
+    { 
+      DeleteAllHLines();
+      float PriceDcaNext = LastBuyOrderOpenPrice  - (LastBuyOrderOpenPrice  * GridAdjustmentFactor);
+      SetHLine(clrRed, "PriceDcaNext:"+DoubleToString(PriceDcaNext,2), PriceDcaNext, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+      SetHLine(clrYellow, "TP "+DoubleToString(MinimumTargetBuyTP,2), MinimumTargetBuyTP, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+      SetHLine(clrSteelBlue, "AveragePrice:"+DoubleToString(AverageBuyPrice,2), AverageBuyPrice, 0, 1); // Hiển thị AveragePrice
+   }
+   else if(SellOrdersCount>0)
+       { 
+      DeleteAllHLines();
+      float PriceDcaNext = LastSellOrderOpenPrice +  (LastSellOrderOpenPrice  * GridAdjustmentFactor);
+      Print("PriceDcaNext= ", PriceDcaNext);
+      DeleteAllHLines();
+      SetHLine(clrRed, "PriceDcaNext:"+DoubleToString(PriceDcaNext,2), PriceDcaNext, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+      SetHLine(clrYellow, "TP "+DoubleToString(MinimumTargetSellTP,2), MinimumTargetSellTP, 0, 1); // Hiển thị mức cắt lỗ trên biểu đồ
+      SetHLine(clrSteelBlue, "AveragePrice:"+DoubleToString(AverageSellPrice,2), AverageSellPrice, 0, 1); // Hiển thị AveragePrice
+      }
   }
 
 //+------------------------------------------------------------------+
